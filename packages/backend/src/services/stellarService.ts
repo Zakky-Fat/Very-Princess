@@ -257,8 +257,8 @@ export class StellarService {
       throw new Error(`Simulation failed: ${simResult.error}`);
     }
 
-        // @ts-expect-error — retval is present on successful simulation results
-        return simResult.result?.retval as xdr.ScVal;
+    // result.retval is present on successful simulations (not reflected in SDK typings)
+    return (simResult.result as { retval: xdr.ScVal } | undefined)?.retval as xdr.ScVal;
   }
 
   /**
