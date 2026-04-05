@@ -59,7 +59,7 @@ impl PayoutRegistry {
     }
 
     /// Retrieve the global token address.
-    /// 
+    ///
     /// # Panics
     /// If the contract has not been initialized.
     pub fn get_token(env: Env) -> Address {
@@ -102,10 +102,8 @@ impl PayoutRegistry {
             .persistent()
             .set(&DataKey::OrgBudget(id.clone()), &0_i128);
 
-        env.events().publish(
-            (symbol_short!("registry"), symbol_short!("org_added")),
-            id,
-        );
+        env.events()
+            .publish((symbol_short!("registry"), symbol_short!("org_added")), id);
     }
 
     pub fn get_org(env: Env, id: Symbol) -> Organization {
@@ -126,7 +124,11 @@ impl PayoutRegistry {
             panic!("amount must be positive");
         }
 
-        if !env.storage().persistent().has(&DataKey::OrgAdmin(org_id.clone())) {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::OrgAdmin(org_id.clone()))
+        {
             panic!("organization not found");
         }
 
@@ -137,7 +139,9 @@ impl PayoutRegistry {
 
         let budget_key = DataKey::OrgBudget(org_id.clone());
         let current_budget: i128 = env.storage().persistent().get(&budget_key).unwrap_or(0);
-        env.storage().persistent().set(&budget_key, &(current_budget + amount));
+        env.storage()
+            .persistent()
+            .set(&budget_key, &(current_budget + amount));
 
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("funded")),
@@ -348,11 +352,7 @@ mod tests {
         }
     }
 
-    fn register_test_org(
-        env: &Env,
-        client: &PayoutRegistryClient,
-        org_sym: Symbol,
-    ) -> Address {
+    fn register_test_org(env: &Env, client: &PayoutRegistryClient, org_sym: Symbol) -> Address {
         let admin = Address::generate(env);
         client.register_org(
             &org_sym,
@@ -386,13 +386,19 @@ mod tests {
 
     #[test]
     fn test_fund_org() {
-        let Setup { env, client, token, token_admin: _token_admin, .. } = setup();
+        let Setup {
+            env,
+            client,
+            token,
+            token_admin: _token_admin,
+            ..
+        } = setup();
         let org_sym = symbol_short!("myorg");
         register_test_org(&env, &client, org_sym.clone());
 
         let donor = Address::generate(&env);
         let token_client = token::Client::new(&env, &token.address);
-        
+
         // Mint tokens to donor
         token.mint(&donor, &100_000_000);
         assert_eq!(token_client.balance(&donor), 100_000_000);
@@ -422,7 +428,9 @@ mod tests {
 
     #[test]
     fn test_allocate_and_claim_with_tokens() {
-        let Setup { env, client, token, .. } = setup();
+        let Setup {
+            env, client, token, ..
+        } = setup();
         let org_sym = symbol_short!("myorg");
         register_test_org(&env, &client, org_sym.clone());
 
@@ -432,7 +440,7 @@ mod tests {
         let donor = Address::generate(&env);
         let token_client = token::Client::new(&env, &token.address);
         token.mint(&donor, &20_000_000);
-        
+
         client.fund_org(&org_sym, &donor, &20_000_000);
 
         // Allocate
@@ -444,7 +452,7 @@ mod tests {
         assert_eq!(token_client.balance(&maintainer), 0);
         let claimed = client.claim_payout(&maintainer);
         assert_eq!(claimed, 5_000_000);
-        
+
         // Assert token state
         assert_eq!(client.get_claimable_balance(&maintainer), 0);
         assert_eq!(token_client.balance(&maintainer), 5_000_000);
