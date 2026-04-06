@@ -315,8 +315,8 @@ impl PayoutRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
-    use soroban_sdk::{symbol_short, token, Env, IntoVal, String};
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{symbol_short, token, Env, String};
 
     // ── Test Helpers ─────────────────────────────────────────────────────────
 
