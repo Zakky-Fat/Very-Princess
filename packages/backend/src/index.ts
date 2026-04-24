@@ -24,7 +24,9 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import { SERVER_HOST, SERVER_PORT } from "./config/env.js";
 import { contractRoutes } from "./routes/contract.js";
-import rateLimit from "@fastify/rate-limit";
+import { errorHandler } from "./plugins/errorHandler.js";
+import { statsRoutes } from "./routes/stats.js";
+import { indexerService } from "./services/indexerService.js";
 
 // ─── Server Setup ─────────────────────────────────────────────────────────────
 
@@ -89,6 +91,17 @@ server.get("/health", async () => ({
   timestamp: new Date().toISOString(),
 }));
 
+// Indexer status endpoint
+server.get("/indexer/status", async () => {
+  return indexerService.getStatus();
+});
+
+// Manual sync trigger endpoint (for testing/admin)
+server.post("/indexer/sync", async () => {
+  await indexerService.triggerSync();
+  return { message: "Sync triggered" };
+});
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 try {
@@ -96,6 +109,23 @@ try {
   server.log.info(
     `very-princess backend listening on http://${SERVER_HOST}:${SERVER_PORT}`
   );
+  
+  // Start the background indexer service
+  indexerService.start();
+  
+  // Graceful shutdown
+  const gracefulShutdown = (signal: string) => {
+    server.log.info(`Received ${signal}, shutting down gracefully...`);
+    indexerService.stop();
+    server.close(() => {
+      server.log.info('Server closed');
+      process.exit(0);
+    });
+  };
+  
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  
 } catch (err) {
   server.log.error(err);
   process.exit(1);
