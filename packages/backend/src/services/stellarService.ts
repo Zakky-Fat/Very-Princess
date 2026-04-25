@@ -38,6 +38,7 @@ import {
   NETWORK_PASSPHRASE,
   RPC_URL,
 } from "../config/env.js";
+import { withRetry } from "../utils/retry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,21 @@ export class StellarService {
     });
   }
 
+  /**
+   * Helper to wrap calls with retry and backoff logic.
+   */
+  private async _callWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+    return withRetry(fn, {
+      onRetry: (error, attempt) => {
+        if (attempt >= 3) {
+          console.error(`[CRITICAL] High-priority: Rate limit backoff exceeded 3 times! (Attempt ${attempt})`);
+        } else {
+          console.warn(`[Stellar] Rate limited. Retrying... (Attempt ${attempt})`);
+        }
+      }
+    });
+  }
+
   // ── Horizon (Account) Operations ─────────────────────────────────────────
 
   /**
@@ -98,7 +114,7 @@ export class StellarService {
    * @throws If the account does not exist on the network.
    */
   async getAccountInfo(publicKey: string): Promise<AccountInfo> {
-    const account = await this.horizon.loadAccount(publicKey);
+    const account = await this._callWithRetry(() => this.horizon.loadAccount(publicKey));
     return {
       id: account.id,
       sequence: account.sequenceNumber(),
@@ -245,6 +261,53 @@ export class StellarService {
       payouts,
     };
   }
+  /**
+   * Get the current state of the contract for indexing purposes.
+   * This method fetches key contract data that should be indexed.
+   *
+   * @param contractId - The contract ID to query
+   * @returns Contract state data for indexing
+   */
+  async getContractState(contractId: string): Promise<Record<string, unknown>> {
+    try {
+      // Get the ledger info to establish baseline
+      const ledger = await this._callWithRetry(() => this.rpcServer.getLatestLedger());
+      
+      // In a real implementation, you would query specific contract storage keys
+      // For now, we'll return basic contract information
+      const contractState = {
+        contractId,
+        ledgerSequence: ledger.sequence,
+        timestamp: new Date().toISOString(), // Use current time since ledger doesn't have timestamp
+        // Add more contract-specific data as needed
+        // This could include total organizations, total budgets, etc.
+      };
+
+      return contractState;
+    } catch (error) {
+      console.error('Error fetching contract state:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch Soroban events for the contract within a ledger range.
+   * 
+   * @param startLedger - The beginning ledger sequence (inclusive)
+   * @returns Array of events
+   */
+  async getEvents(startLedger: number): Promise<SorobanRpc.Api.GetEventsResponse> {
+    return this._callWithRetry(() => this.rpcServer.getEvents({
+      startLedger,
+      filters: [
+        {
+          type: "contract",
+          contractIds: [CONTRACT_ID],
+        },
+      ],
+    }));
+  }
+
   // ── Soroban Write Operations ──────────────────────────────────────────────
 
   /**
@@ -381,7 +444,7 @@ export class StellarService {
       .setTimeout(30)
       .build();
 
-    const simResult = await this.rpcServer.simulateTransaction(tx);
+    const simResult = await this._callWithRetry(() => this.rpcServer.simulateTransaction(tx));
 
     if (SorobanRpc.Api.isSimulationError(simResult)) {
       throw new Error(`Simulation failed: ${simResult.error}`);
@@ -401,7 +464,7 @@ export class StellarService {
     signerSecret: string
   ): Promise<ContractCallResult> {
     const keypair = Keypair.fromSecret(signerSecret);
-    const account = await this.horizon.loadAccount(keypair.publicKey());
+    const account = await this._callWithRetry(() => this.horizon.loadAccount(keypair.publicKey()));
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -421,7 +484,7 @@ export class StellarService {
       .build();
 
     // Simulate to get the authorisation + storage footprint.
-    const simResult = await this.rpcServer.simulateTransaction(tx);
+    const simResult = await this._callWithRetry(() => this.rpcServer.simulateTransaction(tx));
     if (SorobanRpc.Api.isSimulationError(simResult)) {
       throw new Error(`Simulation failed: ${simResult.error}`);
     }
@@ -430,17 +493,17 @@ export class StellarService {
     const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
     preparedTx.sign(keypair);
 
-    const sendResult = await this.rpcServer.sendTransaction(preparedTx);
+    const sendResult = await this._callWithRetry(() => this.rpcServer.sendTransaction(preparedTx));
 
     if (sendResult.status === "ERROR") {
       throw new Error(`Transaction failed: ${JSON.stringify(sendResult)}`);
     }
 
     // Poll for confirmation.
-    let getResult = await this.rpcServer.getTransaction(sendResult.hash);
+    let getResult = await this._callWithRetry(() => this.rpcServer.getTransaction(sendResult.hash));
     while (getResult.status === "NOT_FOUND") {
       await new Promise((r) => setTimeout(r, 1000));
-      getResult = await this.rpcServer.getTransaction(sendResult.hash);
+      getResult = await this._callWithRetry(() => this.rpcServer.getTransaction(sendResult.hash));
     }
 
     if (getResult.status !== "SUCCESS") {
