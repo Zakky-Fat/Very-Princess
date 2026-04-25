@@ -12,19 +12,19 @@ import { WalletButton } from "@/components/WalletButton";
 import { PayoutCard } from "@/components/PayoutCard";
 import { FundOrgModal } from "@/components/FundOrgModal";
 import { useFreighter } from "@/hooks/useFreighter";
-import { 
-  readOrganization, 
-  readMaintainers, 
-  readClaimableBalance, 
-  readOrgBudget, 
-  buildClaimPayoutTransaction, 
-  submitSignedTransaction 
+import {
+  readOrganization,
+  readMaintainers,
+  readClaimableBalance,
+  readOrgBudget,
+  buildClaimPayoutTransaction,
+  submitSignedTransaction,
 } from "@/lib/sorobanClient";
 import type { Organization, MaintainerBalance } from "@/lib/contractTypes";
 
-// ── Dashboard Component ───────────────────────────────────────────────────────
+// ── Inner Component (uses useSearchParams) ────────────────────────────────────
 
-function DashboardContent() {
+function DashboardPageInner() {
   const { isConnected, publicKey, isInitialized, signTransaction } = useFreighter();
   const searchParams = useSearchParams();
 
@@ -41,10 +41,9 @@ function DashboardContent() {
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   /** Fetch org data, budget, and all maintainer balances from Soroban RPC. */
-  const handleLookupOrg = async (id?: string) => {
-    const targetId = id || orgIdInput.trim();
-    if (!targetId) return;
-    
+  const handleLookupOrg = async (idOverride?: string) => {
+    const id = (idOverride ?? orgIdInput).trim();
+    if (!id) return;
     setIsLoading(true);
     setError(null);
     setOrganization(null);
@@ -52,16 +51,14 @@ function DashboardContent() {
     setOrgBudget(null);
 
     try {
-      // Parallel: read org info, budget, and maintainer list simultaneously.
       const [org, budget, maintainerAddresses] = await Promise.all([
-        readOrganization(targetId),
-        readOrgBudget(targetId),
-        readMaintainers(targetId),
+        readOrganization(id),
+        readOrgBudget(id),
+        readMaintainers(id),
       ]);
       setOrganization(org);
       setOrgBudget(budget);
 
-      // Fetch each maintainer's balance (parallel).
       const balanceResults = await Promise.all(
         maintainerAddresses.map((addr) => readClaimableBalance(addr))
       );
@@ -74,14 +71,15 @@ function DashboardContent() {
     }
   };
 
-  // Auto-lookup if org ID is in search params
+  /** Auto-lookup when ?org= param is present in the URL. */
   useEffect(() => {
-    const orgId = searchParams.get("org");
-    if (orgId) {
-      setOrgIdInput(orgId);
-      void handleLookupOrg(orgId);
+    const orgFromUrl = searchParams.get("org");
+    if (orgFromUrl) {
+      setOrgIdInput(orgFromUrl);
+      void handleLookupOrg(orgFromUrl);
     }
-  }, [searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Prepare, sign, and submit the claim_payout transaction. */
   const handleClaim = async (address: string) => {
@@ -91,8 +89,6 @@ function DashboardContent() {
       const unsignedXdr = await buildClaimPayoutTransaction(address);
       const signedXdr = await signTransaction(unsignedXdr);
       await submitSignedTransaction(signedXdr);
-      
-      // Refresh the balances after claim is confirmed
       void handleLookupOrg();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Claim failed");
@@ -105,10 +101,30 @@ function DashboardContent() {
     <div className="flex min-h-screen flex-col">
       {/* ── Navigation ── */}
       <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-stellar-blue/80 backdrop-blur-xl">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <nav
+          className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4"
+          aria-label="Dashboard navigation"
+        >
           <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2 text-white/60 transition-colors hover:text-white">
-              <span className="text-sm font-bold">VP</span>
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-white/60 transition-colors hover:text-white"
+              aria-label="Back to home"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+              Home
             </Link>
             <span className="text-white/20">/</span>
             <h1 className="text-sm font-semibold text-white">Dashboard</h1>
@@ -118,13 +134,15 @@ function DashboardContent() {
       </header>
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-        {/* ── Wallet Guard ─────────────────────────────────────────────── */}
+        {/* ── Wallet Guard ── */}
         {isInitialized && !isConnected ? (
           <div className="flex flex-col items-center justify-center py-32 text-center">
             <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-stellar-purple/30 bg-stellar-purple/10">
               <LockIcon />
             </div>
-            <h2 className="mb-2 text-xl font-semibold text-white">Connect Your Wallet</h2>
+            <h2 className="mb-2 text-xl font-semibold text-white">
+              Connect Your Wallet
+            </h2>
             <p className="mb-8 max-w-sm text-sm text-white/50">
               Connect your Freighter wallet to interact with the PayoutRegistry
               on Stellar Testnet.
@@ -133,10 +151,12 @@ function DashboardContent() {
           </div>
         ) : (
           <>
-            {/* ── Connected State ─────────────────────────────────────── */}
+            {/* ── Connected State ── */}
             <div className="mb-8 flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-white">PayoutRegistry</h2>
+                <h2 className="text-2xl font-bold text-white">
+                  PayoutRegistry
+                </h2>
                 <p className="mt-1 text-sm text-white/50">
                   Look up an organization to view maintainer balances.
                 </p>
@@ -156,7 +176,7 @@ function DashboardContent() {
               </div>
             </div>
 
-            {/* ── Org Lookup Form ─────────────────────────────────────── */}
+            {/* ── Org Lookup Form ── */}
             <div className="glass-card mb-8 p-6">
               <label
                 htmlFor="org-id-input"
@@ -183,16 +203,20 @@ function DashboardContent() {
                   {isLoading ? "Loading..." : "Lookup"}
                 </button>
               </div>
+              <p id="org-id-hint" className="mt-2 text-xs text-white/30">
+                Enter the Symbol ID used when registering the organization
+                on-chain.
+              </p>
             </div>
 
-            {/* ── Error ───────────────────────────────────────────────── */}
+            {/* ── Error ── */}
             {error && (
               <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
                 {error}
               </div>
             )}
 
-            {/* ── Org Info ─────────────────────────────────────────────── */}
+            {/* ── Org Info ── */}
             {organization && (
               <div className="glass-card mb-8 p-6">
                 <div className="mb-4 flex items-center gap-3">
@@ -200,12 +224,18 @@ function DashboardContent() {
                     {organization.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="font-semibold text-white">{organization.name}</h3>
-                    <p className="font-mono text-xs text-white/40">ID: {organization.id}</p>
+                    <h3 className="font-semibold text-white">
+                      {organization.name}
+                    </h3>
+                    <p className="font-mono text-xs text-white/40">
+                      ID: {organization.id}
+                    </p>
                   </div>
                 </div>
                 <div className="rounded-lg border border-white/[0.06] bg-black/20 px-4 py-3">
-                  <p className="text-xs font-medium text-white/40">Admin Address</p>
+                  <p className="text-xs font-medium text-white/40">
+                    Admin Address
+                  </p>
                   <p className="mt-1 break-all font-mono text-sm text-white/70">
                     {organization.admin}
                   </p>
@@ -214,10 +244,16 @@ function DashboardContent() {
                 {orgBudget && (
                   <div className="mt-4 flex items-center justify-between rounded-xl border border-stellar-teal/20 bg-stellar-teal/5 p-4">
                     <div>
-                      <p className="text-xs font-medium uppercase text-stellar-teal/80">Available Budget</p>
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-2xl font-bold text-white">{orgBudget.xlm}</span>
-                        <span className="text-sm font-medium text-stellar-teal">XLM</span>
+                      <p className="text-xs font-medium uppercase tracking-wider text-stellar-teal/80">
+                        Available Budget
+                      </p>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold tracking-tight text-white">
+                          {orgBudget.xlm}
+                        </span>
+                        <span className="text-sm font-medium text-stellar-teal">
+                          XLM
+                        </span>
                       </div>
                     </div>
                     <button
@@ -231,24 +267,35 @@ function DashboardContent() {
               </div>
             )}
 
-            {/* ── Balances Grid ── */}
-            {organization && (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {balances.map((balance) => (
-                  <PayoutCard
-                    key={balance.maintainer}
-                    balance={balance}
-                    isClaiming={claimingAddress === balance.maintainer}
-                    onClaim={() => handleClaim(balance.maintainer)}
-                    canClaim={publicKey === balance.maintainer}
-                  />
-                ))}
+            {/* ── Maintainer Balances ── */}
+            {balances.length > 0 && (
+              <div>
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-widest text-white/40">
+                  Maintainers ({balances.length})
+                </h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {balances.map((balance) => (
+                    <PayoutCard
+                      key={balance.address}
+                      balance={balance}
+                      onClaim={handleClaim}
+                      isClaiming={claimingAddress === balance.address}
+                    />
+                  ))}
+                </div>
               </div>
             )}
 
+            {/* ── Empty State ── */}
             {organization && balances.length === 0 && !isLoading && (
-              <div className="py-20 text-center">
-                <p className="text-white/40">No maintainers found.</p>
+              <div className="rounded-2xl border border-dashed border-white/10 p-12 text-center">
+                <p className="text-sm text-white/40">
+                  No maintainers registered for{" "}
+                  <span className="font-mono text-white/60">
+                    {organization.id}
+                  </span>{" "}
+                  yet.
+                </p>
               </div>
             )}
           </>
@@ -270,22 +317,32 @@ function DashboardContent() {
   );
 }
 
+// ── Root Export (Suspense boundary required for useSearchParams) ──────────────
+
 export default function DashboardPage() {
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-stellar-blue">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-stellar-purple border-t-transparent" />
-      </div>
-    }>
-      <DashboardContent />
+    <Suspense fallback={null}>
+      <DashboardPageInner />
     </Suspense>
   );
 }
 
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
 function LockIcon() {
   return (
-    <svg className="h-8 w-8 text-stellar-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+    <svg
+      className="h-7 w-7 text-stellar-purple"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+      />
     </svg>
   );
 }
