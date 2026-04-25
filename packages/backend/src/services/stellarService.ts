@@ -177,6 +177,41 @@ export class StellarService {
     return BigInt(scValToNative(result as xdr.ScVal) as number);
   }
 
+  /**
+   * Read complete organization details including budget from the contract.
+   * This method queries DataKey::Org(id) and DataKey::OrgBudget(id) directly.
+   *
+   * @param orgId — The Symbol ID of the organization.
+   * @returns Organization details with name, admin address, and budget.
+   */
+  async readOrganizationDetails(orgId: string): Promise<{
+    id: string;
+    name: string;
+    admin: string;
+    budgetStroops: string;
+    budgetXlm: string;
+  }> {
+    // Get organization data from DataKey::Org(id)
+    const orgResult = await this._simulateContractCall("get_org", [
+      nativeToScVal(orgId, { type: "symbol" }),
+    ]);
+    const orgData = scValToNative(orgResult as xdr.ScVal) as Record<string, unknown>;
+
+    // Get budget from DataKey::OrgBudget(id)
+    const budgetResult = await this._simulateContractCall("get_org_budget", [
+      nativeToScVal(orgId, { type: "symbol" }),
+    ]);
+    const budgetStroops = BigInt(scValToNative(budgetResult as xdr.ScVal) as number);
+
+    return {
+      id: orgData.id as string,
+      name: orgData.name as string,
+      admin: orgData.admin as string,
+      budgetStroops: budgetStroops.toString(),
+      budgetXlm: (Number(budgetStroops) / 10_000_000).toFixed(7),
+    };
+  }
+
 
 
   // ── Add inside StellarService class, after readOrgBudget ──────────────────────

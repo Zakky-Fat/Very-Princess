@@ -31,6 +31,7 @@ import { errorHandler } from "./plugins/errorHandler.js";
 import { statsRoutes } from "./routes/stats.js";
 import { tokenRoutes } from "./routes/token.js";
 import { eventsRoutes } from "./routes/events.js";
+import { organizationRoutes } from "./routes/organization.js";
 import { indexerService } from "./services/indexerService.js";
 
 // ─── Server Setup ─────────────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ await server.register(tokenRoutes, { prefix: "/api/v1/tokens" });
 
 await server.register(statsRoutes, { prefix: "/api/stats" });
 await server.register(eventsRoutes, { prefix: "/api/events" });
+await server.register(organizationRoutes, { prefix: "/api/org" });
 
 // Health check — used by CI, load balancers, and monitoring.
 server.get("/health", async () => ({
