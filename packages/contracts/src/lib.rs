@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, IntoVal, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Bytes, BytesN, Env, FromVal, IntoVal, String, Symbol, Vec,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,11 +186,14 @@ impl PayoutRegistry {
         admin.require_auth();
 
         // Generate a deterministic ID based on admin address and name
+        let admin_val = admin.to_val();
+        let name_val = name.clone().to_val();
         let mut combined_data = Vec::new(&env);
-        combined_data.push_back(admin.clone());
-        combined_data.push_back(name.clone());
-        let id_bytes = env.crypto().sha256(&combined_data);
-        let id = Symbol::new(&env, &id_bytes);
+        combined_data.push_back(admin_val);
+        combined_data.push_back(name_val);
+        let combined_bytes = Bytes::from_val(&env, &combined_data.to_val());
+        let id_bytes = env.crypto().sha256(&combined_bytes);
+        let id = Symbol::new(&env, "org_id");
 
         let org_key = DataKey::Organization(id.clone());
 
@@ -226,7 +229,7 @@ impl PayoutRegistry {
             (id.clone(), admin.clone()),
         );
 
-        id_bytes
+        id_bytes.into()
     }
 
     pub fn get_org(env: Env, id: Symbol) -> Organization {
@@ -278,10 +281,11 @@ impl PayoutRegistry {
         let mut org = Self::get_org(env.clone(), org_id.clone());
         
         // Authorization: Check if the caller is an existing admin
+        let caller = env.current_contract_address();
         let mut is_authorized = false;
         for i in 0..org.admins.len() {
             let admin = org.admins.get(i).unwrap();
-            if admin.has_auth() {
+            if caller == admin {
                 is_authorized = true;
                 break;
             }
@@ -314,10 +318,11 @@ impl PayoutRegistry {
         let mut org = Self::get_org(env.clone(), org_id.clone());
         
         // Authorization: Check if the caller is an existing admin
+        let caller = env.current_contract_address();
         let mut is_authorized = false;
         for i in 0..org.admins.len() {
             let admin = org.admins.get(i).unwrap();
-            if admin.has_auth() {
+            if caller == admin {
                 is_authorized = true;
                 break;
             }
@@ -429,18 +434,14 @@ impl PayoutRegistry {
         Self::assert_active(&env);
         let org = Self::get_org(env.clone(), org_id.clone());
         
-        // Authorization: Check if the caller is one of the authorized admins
+        // Authorization: Check if caller is one of authorized admins
+        let caller = env.current_contract_address();
         let mut is_authorized = false;
-        let mut authorized_admin = None;
         for i in 0..org.admins.len() {
             let admin = org.admins.get(i).unwrap();
-            // We use require_auth_for_args to ensure the specific admin authorized this action
-            // However, we only need ONE of them to authorize.
-            // Since require_auth_for_args panics if not authorized, we should check if they HAVE auth.
-            if admin.has_auth() {
+            if caller == admin {
                 admin.require_auth_for_args((org_id.clone(), maintainer.clone(), amount, unlock_timestamp).into_val(&env));
                 is_authorized = true;
-                authorized_admin = Some(admin);
                 break;
             }
         }
@@ -470,7 +471,7 @@ impl PayoutRegistry {
 
         env.storage()
             .persistent()
-            .set(&budget_key, &(current_budget - amount));
+            .set(&budget_key, &(current_budget.checked_sub(amount).expect("budget underflow"));
 
         let balance_key = DataKey::MaintainerBalance(maintainer.clone());
         let mut current_payout: MaintainerPayout = env
@@ -539,7 +540,7 @@ impl PayoutRegistry {
             if maintainer_org != org_id {
                 panic!("maintainer does not belong to this organization");
             }
-            total += entry.amount;
+            total = total.checked_add(entry.amount).expect("total overflow");
         }
 
         // Verify the org has enough budget to cover the entire batch
@@ -552,7 +553,7 @@ impl PayoutRegistry {
         // Deduct total from org budget in one write
         env.storage()
             .persistent()
-            .set(&budget_key, &(current_budget - total));
+            .set(&budget_key, &(current_budget.checked_sub(total).expect("budget underflow")));
 
         // Accumulate each maintainer's claimable balance
         for i in 0..payouts.len() {
@@ -565,7 +566,7 @@ impl PayoutRegistry {
                 .unwrap_or(0_i128);
             env.storage()
                 .persistent()
-                .set(&balance_key, &(current_balance + entry.amount));
+                .set(&balance_key, &(current_balance.checked_add(entry.amount).expect("balance overflow")));
         }
 
         // Emit a single batch_allocated event
@@ -691,7 +692,7 @@ impl PayoutRegistry {
         Self::verify_multisig_auth(&env);
         
         // Perform the upgrade
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
         
         // Emit upgrade event
         env.events().publish(
