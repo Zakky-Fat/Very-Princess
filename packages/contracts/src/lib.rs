@@ -72,6 +72,22 @@ pub enum DataKey {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TTL Constants
+//
+// Stellar charges rent for persistent ledger entries. Failing to extend TTLs
+// is the #1 reason Soroban contracts fail on Mainnet after a few weeks.
+//
+// Ledger close time ≈ 5 seconds on Mainnet / Testnet.
+//   30 days  ≈ 518_400 ledgers
+//   7 days   ≈ 120_960 ledgers  (threshold — extend before this point)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extend persistent entries to live for ~30 days from the current ledger.
+const PERSISTENT_BUMP_AMOUNT: u32 = 518_400;
+/// Trigger an extension when fewer than ~7 days of TTL remain.
+const PERSISTENT_LIFETIME_THRESHOLD: u32 = 120_960;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Contract
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -98,13 +114,16 @@ impl PayoutRegistry {
         }
         
         env.storage().persistent().set(&DataKey::Token, &token);
+        env.storage().persistent().extend_ttl(&DataKey::Token, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         
         let multisig_admin = MultisigAdmin {
             admins: admins.clone(),
             threshold,
         };
         env.storage().persistent().set(&DataKey::MultisigAdmin, &multisig_admin);
+        env.storage().persistent().extend_ttl(&DataKey::MultisigAdmin, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         env.storage().persistent().set(&DataKey::ProtocolState, &ProtocolState::Active);
+        env.storage().persistent().extend_ttl(&DataKey::ProtocolState, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         
         env.events().publish(
             (Symbol::new(&env, "VeryPrincess"), Symbol::new(&env, "Initialized")),
@@ -113,6 +132,9 @@ impl PayoutRegistry {
     }
 
     pub fn get_token(env: Env) -> Address {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Token, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         env.storage()
             .persistent()
             .get(&DataKey::Token)
@@ -126,6 +148,9 @@ impl PayoutRegistry {
     pub fn get_multisig_admin(env: Env) -> MultisigAdmin {
         env.storage()
             .persistent()
+            .extend_ttl(&DataKey::MultisigAdmin, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage()
+            .persistent()
             .get(&DataKey::MultisigAdmin)
             .expect("contract not initialized")
     }
@@ -135,6 +160,9 @@ impl PayoutRegistry {
     /// # Panics
     /// If the contract has not been initialized.
     pub fn get_protocol_state(env: Env) -> ProtocolState {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::ProtocolState, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         env.storage()
             .persistent()
             .get(&DataKey::ProtocolState)
@@ -209,19 +237,29 @@ impl PayoutRegistry {
             admins: admins.clone(),
         };
         env.storage().persistent().set(&org_key, &org);
+        env.storage().persistent().extend_ttl(&org_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.storage()
             .persistent()
             .set(&DataKey::OrgAdmin(id.clone()), &admin);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::OrgAdmin(id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         let empty_list: Vec<Address> = Vec::new(&env);
         env.storage()
             .persistent()
             .set(&DataKey::OrgMaintainers(id.clone()), &empty_list);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::OrgMaintainers(id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.storage()
             .persistent()
             .set(&DataKey::OrgBudget(id.clone()), &0_i128);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::OrgBudget(id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
             (Symbol::new(&env, "VeryPrincess"), Symbol::new(&env, "org_registered")),
@@ -232,6 +270,9 @@ impl PayoutRegistry {
     }
 
     pub fn get_org(env: Env, id: Symbol) -> Organization {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Organization(id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         env.storage()
             .persistent()
             .get(&DataKey::Organization(id))
@@ -263,6 +304,9 @@ impl PayoutRegistry {
         env.storage()
             .persistent()
             .set(&budget_key, &new_budget);
+        env.storage()
+            .persistent()
+            .extend_ttl(&budget_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         // Interactions: Execute the token transfer as the absolute last step
         // This follows the Check-Effects-Interactions pattern.
@@ -305,6 +349,7 @@ impl PayoutRegistry {
 
         org.admins.push_back(new_admin.clone());
         env.storage().persistent().set(&DataKey::Organization(org_id.clone()), &org);
+        env.storage().persistent().extend_ttl(&DataKey::Organization(org_id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
             (Symbol::new(&env, "VeryPrincess"), Symbol::new(&env, "AdminAdded")),
@@ -345,6 +390,7 @@ impl PayoutRegistry {
             Some(i) => {
                 org.admins.remove(i);
                 env.storage().persistent().set(&DataKey::Organization(org_id.clone()), &org);
+                env.storage().persistent().extend_ttl(&DataKey::Organization(org_id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
             },
             None => panic!("address is not an admin"),
         }
@@ -356,6 +402,9 @@ impl PayoutRegistry {
     }
 
     pub fn get_org_budget(env: Env, id: Symbol) -> i128 {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::OrgBudget(id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         env.storage()
             .persistent()
             .get(&DataKey::OrgBudget(id))
@@ -385,10 +434,16 @@ impl PayoutRegistry {
         env.storage()
             .persistent()
             .set(&DataKey::MaintainerOrg(maintainer.clone()), &org_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::MaintainerOrg(maintainer.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.storage()
             .persistent()
             .set(&DataKey::MaintainerBalance(maintainer.clone()), &MaintainerPayout { amount: 0, unlock_timestamp: 0 });
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::MaintainerBalance(maintainer.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         let maintainer_list_key = DataKey::OrgMaintainers(org_id.clone());
         let mut maintainers: Vec<Address> = env
@@ -400,6 +455,9 @@ impl PayoutRegistry {
         env.storage()
             .persistent()
             .set(&maintainer_list_key, &maintainers);
+        env.storage()
+            .persistent()
+            .extend_ttl(&maintainer_list_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
     (Symbol::new(&env, "VeryPrincess"), Symbol::new(&env, "MaintainerAdded")),
@@ -408,6 +466,9 @@ impl PayoutRegistry {
     }
 
     pub fn get_maintainer(env: Env, address: Address) -> Maintainer {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::MaintainerOrg(address.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         let org_id: Symbol = env
             .storage()
             .persistent()
@@ -417,6 +478,9 @@ impl PayoutRegistry {
     }
 
     pub fn get_maintainers(env: Env, org_id: Symbol) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::OrgMaintainers(org_id.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         env.storage()
             .persistent()
             .get(&DataKey::OrgMaintainers(org_id))
@@ -473,6 +537,9 @@ impl PayoutRegistry {
         env.storage()
             .persistent()
             .set(&budget_key, &(current_budget - amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&budget_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         let balance_key = DataKey::MaintainerBalance(maintainer.clone());
         let mut current_payout: MaintainerPayout = env
@@ -483,6 +550,7 @@ impl PayoutRegistry {
         current_payout.amount = current_payout.amount.checked_add(amount).expect("payout amount overflow");
         current_payout.unlock_timestamp = unlock_timestamp;
         env.storage().persistent().set(&balance_key, &current_payout);
+        env.storage().persistent().extend_ttl(&balance_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
     (Symbol::new(&env, "VeryPrincess"), Symbol::new(&env, "PayoutAllocated")),
@@ -555,6 +623,9 @@ impl PayoutRegistry {
         env.storage()
             .persistent()
             .set(&budget_key, &(current_budget - total));
+        env.storage()
+            .persistent()
+            .extend_ttl(&budget_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         // Accumulate each maintainer's claimable balance
         for i in 0..payouts.len() {
@@ -568,6 +639,9 @@ impl PayoutRegistry {
             env.storage()
                 .persistent()
                 .set(&balance_key, &(current_balance + entry.amount));
+            env.storage()
+                .persistent()
+                .extend_ttl(&balance_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         }
 
         // Emit a single batch_allocated event
@@ -578,6 +652,9 @@ impl PayoutRegistry {
     }
 
     pub fn get_claimable_balance(env: Env, maintainer: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::MaintainerBalance(maintainer.clone()), PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         let payout: MaintainerPayout = env.storage()
             .persistent()
             .get(&DataKey::MaintainerBalance(maintainer))
@@ -612,6 +689,7 @@ impl PayoutRegistry {
         // Reset balance BEFORE transfer to prevent reentrancy or state corruption
         payout.amount = 0;
         env.storage().persistent().set(&balance_key, &payout);
+        env.storage().persistent().extend_ttl(&balance_key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         // Interactions: Execute the token transfer as the absolute last step
         // This follows the Check-Effects-Interactions pattern.
@@ -644,6 +722,7 @@ impl PayoutRegistry {
         
         // Update the protocol state to paused
         env.storage().persistent().set(&DataKey::ProtocolState, &ProtocolState::Paused);
+        env.storage().persistent().extend_ttl(&DataKey::ProtocolState, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         
         // Emit pause event
         env.events().publish(
@@ -664,6 +743,7 @@ impl PayoutRegistry {
         
         // Update the protocol state to active
         env.storage().persistent().set(&DataKey::ProtocolState, &ProtocolState::Active);
+        env.storage().persistent().extend_ttl(&DataKey::ProtocolState, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         
         // Emit unpause event
         env.events().publish(
